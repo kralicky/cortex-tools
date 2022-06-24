@@ -26,8 +26,8 @@ const maxErrMsgLen = 512
 
 var UserAgent = fmt.Sprintf("Benchtool/%s", version.Version)
 
-// writeClient allows reading and writing from/to a remote HTTP endpoint.
-type writeClient struct {
+// WriteClient allows reading and writing from/to a remote HTTP endpoint.
+type WriteClient struct {
 	remoteName string // Used to differentiate clients in metrics.
 	url        *config_util.URL
 	Client     *http.Client
@@ -38,8 +38,8 @@ type writeClient struct {
 	requestDuration *prometheus.HistogramVec
 }
 
-// newWriteClient creates a new client for remote write.
-func newWriteClient(name string, tenantName string, conf *remote.ClientConfig, logger log.Logger, requestHistogram *prometheus.HistogramVec) (*writeClient, error) {
+// NewWriteClient creates a new client for remote write.
+func NewWriteClient(name string, tenantName string, conf *remote.ClientConfig, logger log.Logger, requestHistogram *prometheus.HistogramVec) (*WriteClient, error) {
 	httpClient, err := config_util.NewClientFromConfig(conf.HTTPClientConfig, "bench_write_client", config_util.WithHTTP2Disabled())
 	if err != nil {
 		return nil, err
@@ -50,7 +50,7 @@ func newWriteClient(name string, tenantName string, conf *remote.ClientConfig, l
 		RoundTripper: t,
 	}
 
-	return &writeClient{
+	return &WriteClient{
 		remoteName: name,
 		url:        conf.URL,
 		Client:     httpClient,
@@ -63,7 +63,7 @@ func newWriteClient(name string, tenantName string, conf *remote.ClientConfig, l
 
 // Store sends a batch of samples to the HTTP endpoint, the request is the proto marshalled
 // and encoded bytes from codec.go.
-func (c *writeClient) Store(ctx context.Context, req []byte) error {
+func (c *WriteClient) Store(ctx context.Context, req []byte) error {
 	spanLog, ctx := spanlogger.New(ctx, "writeClient.Store")
 	defer spanLog.Span.Finish()
 	httpReq, err := http.NewRequest("POST", c.url.String(), bytes.NewReader(req))

@@ -62,9 +62,9 @@ type WorkloadDesc struct {
 }
 
 type Timeseries struct {
-	labelSets  [][]prompb.Label
-	lastValue  float64
-	seriesType SeriesType
+	LabelSets  [][]prompb.Label
+	LastValue  float64
+	SeriesType SeriesType
 }
 
 type WriteWorkload struct {
@@ -80,7 +80,7 @@ type WriteWorkload struct {
 	seriesBufferChan chan []prompb.TimeSeries
 }
 
-func newWriteWorkload(workloadDesc WorkloadDesc, reg prometheus.Registerer) *WriteWorkload {
+func NewWriteWorkload(workloadDesc WorkloadDesc, reg prometheus.Registerer) *WriteWorkload {
 	series, totalSeriesTypeMap := SeriesDescToSeries(workloadDesc.Series)
 
 	totalSeries := 0
@@ -144,12 +144,12 @@ func SeriesDescToSeries(seriesDescs []SeriesDesc) ([]*Timeseries, map[SeriesType
 
 		// Create the dynamic label set
 		for _, lbl := range seriesDesc.Labels {
-			labelSets = addLabelToLabelSet(labelSets, lbl)
+			labelSets = AddLabelToLabelSet(labelSets, lbl)
 		}
 
 		series = append(series, &Timeseries{
-			labelSets:  labelSets,
-			seriesType: seriesDesc.Type,
+			LabelSets:  labelSets,
+			SeriesType: seriesDesc.Type,
 		})
 		numSeries := len(labelSets)
 		totalSeriesTypeMap[seriesDesc.Type] += numSeries
@@ -158,7 +158,7 @@ func SeriesDescToSeries(seriesDescs []SeriesDesc) ([]*Timeseries, map[SeriesType
 	return series, totalSeriesTypeMap
 }
 
-func addLabelToLabelSet(labelSets [][]prompb.Label, lbl LabelDesc) [][]prompb.Label {
+func AddLabelToLabelSet(labelSets [][]prompb.Label, lbl LabelDesc) [][]prompb.Label {
 	newLabelSets := make([][]prompb.Label, 0, len(labelSets)*lbl.UniqueValues)
 	for i := 0; i < lbl.UniqueValues; i++ {
 		for _, labelSet := range labelSets {
@@ -184,20 +184,20 @@ func (w *WriteWorkload) GenerateTimeSeries(id string, t time.Time) []prompb.Time
 		idLabel := prompb.Label{Name: "bench_id", Value: id}
 		for _, series := range w.Series {
 			var value float64
-			switch series.seriesType {
+			switch series.SeriesType {
 			case GaugeZero:
 				value = 0
 			case GaugeRandom:
 				value = rand.Float64()
 			case CounterOne:
-				value = series.lastValue + 1
+				value = series.LastValue + 1
 			case CounterRandom:
-				value = series.lastValue + float64(rand.Int())
+				value = series.LastValue + float64(rand.Int())
 			default:
-				panic(fmt.Sprintf("unknown series type %v", series.seriesType))
+				panic(fmt.Sprintf("unknown series type %v", series.SeriesType))
 			}
-			series.lastValue = value
-			for _, labelSet := range series.labelSets {
+			series.LastValue = value
+			for _, labelSet := range series.LabelSets {
 				newLabelSet := make([]prompb.Label, len(labelSet)+2)
 				copy(newLabelSet, labelSet)
 
@@ -217,13 +217,13 @@ func (w *WriteWorkload) GenerateTimeSeries(id string, t time.Time) []prompb.Time
 	return timeseries
 }
 
-type batchReq struct {
-	batch   []prompb.TimeSeries
-	wg      *sync.WaitGroup
-	putBack chan []prompb.TimeSeries
+type BatchReq struct {
+	Batch   []prompb.TimeSeries
+	Wg      *sync.WaitGroup
+	PutBack chan []prompb.TimeSeries
 }
 
-func (w *WriteWorkload) getSeriesBuffer(ctx context.Context) []prompb.TimeSeries {
+func (w *WriteWorkload) GetSeriesBuffer(ctx context.Context) []prompb.TimeSeries {
 	select {
 	case <-ctx.Done():
 		return nil
@@ -232,13 +232,13 @@ func (w *WriteWorkload) getSeriesBuffer(ctx context.Context) []prompb.TimeSeries
 	}
 }
 
-func (w *WriteWorkload) generateWriteBatch(ctx context.Context, id string, numBuffers int, seriesChan chan batchReq) error {
+func (w *WriteWorkload) GenerateWriteBatch(ctx context.Context, id string, numBuffers int, seriesChan chan BatchReq) error {
 	w.seriesBufferChan = make(chan []prompb.TimeSeries, numBuffers)
 	for i := 0; i < numBuffers; i++ {
 		w.seriesBufferChan <- make([]prompb.TimeSeries, 0, w.options.BatchSize)
 	}
 
-	seriesBuffer := w.getSeriesBuffer(ctx)
+	seriesBuffer := w.GetSeriesBuffer(ctx)
 	ticker := time.NewTicker(w.options.Interval)
 
 	defer close(seriesChan)
@@ -263,24 +263,24 @@ func (w *WriteWorkload) generateWriteBatch(ctx context.Context, id string, numBu
 			idLabel := prompb.Label{Name: "bench_id", Value: id}
 			for _, series := range w.Series {
 				var value float64
-				switch series.seriesType {
+				switch series.SeriesType {
 				case GaugeZero:
 					value = 0
 				case GaugeRandom:
 					value = rand.Float64()
 				case CounterOne:
-					value = series.lastValue + 1
+					value = series.LastValue + 1
 				case CounterRandom:
-					value = series.lastValue + float64(rand.Int())
+					value = series.LastValue + float64(rand.Int())
 				default:
-					return fmt.Errorf("unknown series type %v", series.seriesType)
+					return fmt.Errorf("unknown series type %v", series.SeriesType)
 				}
-				series.lastValue = value
-				for _, labelSet := range series.labelSets {
+				series.LastValue = value
+				for _, labelSet := range series.LabelSets {
 					if len(seriesBuffer) == w.options.BatchSize {
 						wg.Add(1)
-						seriesChan <- batchReq{seriesBuffer, wg, w.seriesBufferChan}
-						seriesBuffer = w.getSeriesBuffer(ctx)
+						seriesChan <- BatchReq{seriesBuffer, wg, w.seriesBufferChan}
+						seriesBuffer = w.GetSeriesBuffer(ctx)
 					}
 					newLabelSet := make([]prompb.Label, len(labelSet)+2)
 					copy(newLabelSet, labelSet)
@@ -299,8 +299,8 @@ func (w *WriteWorkload) generateWriteBatch(ctx context.Context, id string, numBu
 		}
 		if len(seriesBuffer) > 0 {
 			wg.Add(1)
-			seriesChan <- batchReq{seriesBuffer, wg, w.seriesBufferChan}
-			seriesBuffer = w.getSeriesBuffer(ctx)
+			seriesChan <- BatchReq{seriesBuffer, wg, w.seriesBufferChan}
+			seriesBuffer = w.GetSeriesBuffer(ctx)
 		}
 		wg.Wait()
 		if time.Since(timeNow) > w.options.Interval {
@@ -311,22 +311,22 @@ func (w *WriteWorkload) generateWriteBatch(ctx context.Context, id string, numBu
 	return nil
 }
 
-type queryWorkload struct {
-	queries []query
+type QueryWorkload struct {
+	Queries []Query
 }
 
-type exprTemplateData struct {
+type ExprTemplateData struct {
 	Name     string
 	Matchers string
 }
 
-type query struct {
-	interval  time.Duration
-	timeRange time.Duration
-	expr      string
+type Query struct {
+	Interval  time.Duration
+	TimeRange time.Duration
+	Expr      string
 }
 
-func newQueryWorkload(id string, desc WorkloadDesc) (*queryWorkload, error) {
+func NewQueryWorkload(id string, desc WorkloadDesc) (*QueryWorkload, error) {
 	seriesTypeMap := map[SeriesType][]SeriesDesc{
 		GaugeZero:     nil,
 		GaugeRandom:   nil,
@@ -348,7 +348,7 @@ func newQueryWorkload(id string, desc WorkloadDesc) (*queryWorkload, error) {
 	hashSeed := adler32.Checksum([]byte(id))
 	rand := rand.New(rand.NewSource(int64(hashSeed)))
 
-	queries := []query{}
+	queries := []Query{}
 	for _, queryDesc := range desc.QueryDesc {
 		exprTemplate, err := template.New("query").Delims("<<", ">>").Parse(queryDesc.ExprTemplate)
 		if err != nil {
@@ -378,7 +378,7 @@ func newQueryWorkload(id string, desc WorkloadDesc) (*queryWorkload, error) {
 			}
 
 			var b bytes.Buffer
-			err = exprTemplate.Execute(&b, exprTemplateData{
+			err = exprTemplate.Execute(&b, ExprTemplateData{
 				Name:     seriesDesc.Name,
 				Matchers: strings.Join(matchers, ", "),
 			})
@@ -386,13 +386,13 @@ func newQueryWorkload(id string, desc WorkloadDesc) (*queryWorkload, error) {
 				return nil, fmt.Errorf("unable to execute expr_template %s, %w", queryDesc.ExprTemplate, err)
 			}
 
-			queries = append(queries, query{
-				interval:  queryDesc.Interval,
-				timeRange: queryDesc.TimeRange,
-				expr:      b.String(),
+			queries = append(queries, Query{
+				Interval:  queryDesc.Interval,
+				TimeRange: queryDesc.TimeRange,
+				Expr:      b.String(),
 			})
 		}
 	}
 
-	return &queryWorkload{queries}, nil
+	return &QueryWorkload{queries}, nil
 }

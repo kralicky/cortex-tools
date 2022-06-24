@@ -48,7 +48,7 @@ type WriteBenchmarkRunner struct {
 	// Do DNS client side load balancing if configured
 	remoteMtx  sync.Mutex
 	addresses  []string
-	clientPool map[string]*writeClient
+	clientPool map[string]*WriteClient
 
 	dnsProvider *dns.Provider
 
@@ -72,7 +72,7 @@ func NewWriteBenchmarkRunner(id string, tenantName string, cfg WriteBenchConfig,
 			extprom.WrapRegistererWithPrefix("benchtool_write_", reg),
 			dns.GolangResolverType,
 		),
-		clientPool: map[string]*writeClient{},
+		clientPool: map[string]*WriteClient{},
 		logger:     logger,
 		reg:        reg,
 		requestDuration: promauto.With(reg).NewHistogramVec(
@@ -86,7 +86,7 @@ func NewWriteBenchmarkRunner(id string, tenantName string, cfg WriteBenchConfig,
 	}
 
 	// Resolve an initial set of distributor addresses
-	err := writeBench.resolveAddrs()
+	err := writeBench.ResolveAddrs()
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to resolve enpoints")
 	}
@@ -94,7 +94,7 @@ func NewWriteBenchmarkRunner(id string, tenantName string, cfg WriteBenchConfig,
 	return writeBench, nil
 }
 
-func (w *WriteBenchmarkRunner) getRandomWriteClient() (*writeClient, error) {
+func (w *WriteBenchmarkRunner) GetRandomWriteClient() (*WriteClient, error) {
 	w.remoteMtx.Lock()
 	defer w.remoteMtx.Unlock()
 
@@ -104,7 +104,7 @@ func (w *WriteBenchmarkRunner) getRandomWriteClient() (*writeClient, error) {
 	randomIndex := rand.Intn(len(w.addresses))
 	pick := w.addresses[randomIndex]
 
-	var cli *writeClient
+	var cli *WriteClient
 	var exists bool
 
 	if cli, exists = w.clientPool[pick]; !exists {
@@ -121,7 +121,7 @@ func (w *WriteBenchmarkRunner) getRandomWriteClient() (*writeClient, error) {
 			}
 		}
 
-		cli, err = newWriteClient("bench-"+pick, w.tenantName, &remote.ClientConfig{
+		cli, err = NewWriteClient("bench-"+pick, w.tenantName, &remote.ClientConfig{
 			URL:     &config.URL{URL: u},
 			Timeout: model.Duration(w.workload.options.Timeout),
 
@@ -147,36 +147,36 @@ func (w *WriteBenchmarkRunner) getRandomWriteClient() (*writeClient, error) {
 // Run starts a loop that forwards metrics to the configured remote write endpoint
 func (w *WriteBenchmarkRunner) Run(ctx context.Context) error {
 	// Start a loop to re-resolve addresses every 5 minutes
-	go w.resolveAddrsLoop(ctx)
+	go w.ResolveAddrsLoop(ctx)
 
 	// Run replicas * 10 write client workers.
 	// This number will also be used for the number of series buffers to store at once.
 	numWorkers := w.workload.Replicas * 10
 
-	batchChan := make(chan batchReq, 10)
+	batchChan := make(chan BatchReq, 10)
 	for i := 0; i < numWorkers; i++ {
-		go w.writeWorker(batchChan)
+		go w.WriteWorker(batchChan)
 	}
 
-	return w.workload.generateWriteBatch(ctx, w.id, numWorkers+10, batchChan)
+	return w.workload.GenerateWriteBatch(ctx, w.id, numWorkers+10, batchChan)
 }
 
-func (w *WriteBenchmarkRunner) writeWorker(batchChan chan batchReq) {
+func (w *WriteBenchmarkRunner) WriteWorker(batchChan chan BatchReq) {
 	for batchReq := range batchChan {
-		err := w.sendBatch(context.Background(), batchReq.batch)
+		err := w.SendBatch(context.Background(), batchReq.Batch)
 		if err != nil {
 			level.Warn(w.logger).Log("msg", "unable to send batch", "err", err)
 		}
 
 		// put back the series buffer
-		batchReq.putBack <- batchReq.batch
-		batchReq.wg.Done()
+		batchReq.PutBack <- batchReq.Batch
+		batchReq.Wg.Done()
 	}
 }
 
-func (w *WriteBenchmarkRunner) sendBatch(ctx context.Context, batch []prompb.TimeSeries) error {
+func (w *WriteBenchmarkRunner) SendBatch(ctx context.Context, batch []prompb.TimeSeries) error {
 	level.Debug(w.logger).Log("msg", "sending timeseries batch", "num_series", strconv.Itoa(len(batch)))
-	cli, err := w.getRandomWriteClient()
+	cli, err := w.GetRandomWriteClient()
 	if err != nil {
 		return errors.Wrap(err, "unable to get remote-write client")
 	}
@@ -200,14 +200,14 @@ func (w *WriteBenchmarkRunner) sendBatch(ctx context.Context, batch []prompb.Tim
 	return nil
 }
 
-func (w *WriteBenchmarkRunner) resolveAddrsLoop(ctx context.Context) {
+func (w *WriteBenchmarkRunner) ResolveAddrsLoop(ctx context.Context) {
 	ticker := time.NewTicker(time.Minute * 5)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
-			err := w.resolveAddrs()
+			err := w.ResolveAddrs()
 			if err != nil {
 				level.Warn(w.logger).Log("msg", "failed update remote write servers list", "err", err)
 			}
@@ -217,7 +217,7 @@ func (w *WriteBenchmarkRunner) resolveAddrsLoop(ctx context.Context) {
 	}
 }
 
-func (w *WriteBenchmarkRunner) resolveAddrs() error {
+func (w *WriteBenchmarkRunner) ResolveAddrs() error {
 	// Resolve configured addresses with a reasonable timeout.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

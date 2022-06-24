@@ -35,7 +35,7 @@ func (cfg *QueryConfig) RegisterFlags(f *flag.FlagSet) {
 	f.StringVar(&cfg.BasicAuthPasword, "bench.query.basic-auth-password", "", "Set the basic auth password on remote query requests.")
 }
 
-type queryRunner struct {
+type QueryRunner struct {
 	id         string
 	tenantName string
 	cfg        QueryConfig
@@ -46,7 +46,7 @@ type queryRunner struct {
 	addresses   []string
 	clientPool  map[string]v1.API
 
-	workload *queryWorkload
+	workload *QueryWorkload
 
 	reg    prometheus.Registerer
 	logger log.Logger
@@ -54,8 +54,8 @@ type queryRunner struct {
 	requestDuration *prometheus.HistogramVec
 }
 
-func newQueryRunner(id string, tenantName string, cfg QueryConfig, workload *queryWorkload, logger log.Logger, reg prometheus.Registerer) (*queryRunner, error) {
-	runner := &queryRunner{
+func NewQueryRunner(id string, tenantName string, cfg QueryConfig, workload *QueryWorkload, logger log.Logger, reg prometheus.Registerer) (*QueryRunner, error) {
+	runner := &QueryRunner{
 		id:         id,
 		tenantName: tenantName,
 		cfg:        cfg,
@@ -83,34 +83,34 @@ func newQueryRunner(id string, tenantName string, cfg QueryConfig, workload *que
 	return runner, nil
 }
 
-// jitterUp adds random jitter to the duration.
+// JitterUp adds random jitter to the duration.
 //
 // This adds or subtracts time from the duration within a given jitter fraction.
 // For example for 10s and jitter 0.1, it will return a time within [9s, 11s])
 //
 // Reference: https://godoc.org/github.com/grpc-ecosystem/go-grpc-middleware/util/backoffutils
-func jitterUp(duration time.Duration, jitter float64) time.Duration {
+func JitterUp(duration time.Duration, jitter float64) time.Duration {
 	multiplier := jitter * (rand.Float64()*2 - 1)
 	return time.Duration(float64(duration) * (1 + multiplier))
 }
 
-func (q *queryRunner) Run(ctx context.Context) error {
-	go q.resolveAddrsLoop(ctx)
+func (q *QueryRunner) Run(ctx context.Context) error {
+	go q.ResolveAddrsLoop(ctx)
 
-	queryChan := make(chan query, 1000)
+	queryChan := make(chan Query, 1000)
 	for i := 0; i < 100; i++ {
-		go q.queryWorker(queryChan)
+		go q.QueryWorker(queryChan)
 	}
-	for _, queryReq := range q.workload.queries {
+	for _, queryReq := range q.workload.Queries {
 		// every query has a ticker and a Go loop...
 		// not sure if this is a good idea but it should be fine
-		go func(req query) {
+		go func(req Query) {
 			// issue the initial query with a jitter
-			firstWait := jitterUp(req.interval, 0.4)
+			firstWait := JitterUp(req.Interval, 0.4)
 			time.Sleep(firstWait)
 			queryChan <- req
 
-			ticker := time.NewTicker(req.interval)
+			ticker := time.NewTicker(req.Interval)
 			defer ticker.Stop()
 			for {
 				select {
@@ -130,33 +130,33 @@ func (q *queryRunner) Run(ctx context.Context) error {
 	}
 }
 
-func (q *queryRunner) queryWorker(queryChan chan query) {
+func (q *QueryRunner) QueryWorker(queryChan chan Query) {
 	for queryReq := range queryChan {
-		err := q.executeQuery(context.Background(), queryReq)
+		err := q.ExecuteQuery(context.Background(), queryReq)
 		if err != nil {
 			level.Warn(q.logger).Log("msg", "unable to execute query", "err", err)
 		}
 	}
 }
 
-type tenantIDRoundTripper struct {
-	tenantName string
-	next       http.RoundTripper
+type TenantIDRoundTripper struct {
+	TenantName string
+	Next       http.RoundTripper
 }
 
-func (r *tenantIDRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	if r.tenantName != "" {
-		req.Header.Set("X-Scope-OrgID", r.tenantName)
+func (r *TenantIDRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if r.TenantName != "" {
+		req.Header.Set("X-Scope-OrgID", r.TenantName)
 	}
-	return r.next.RoundTrip(req)
+	return r.Next.RoundTrip(req)
 }
 
-func newQueryClient(url, tenantName, username, password string) (v1.API, error) {
+func NewQueryClient(url, tenantName, username, password string) (v1.API, error) {
 	apiClient, err := api.NewClient(api.Config{
 		Address: url,
-		RoundTripper: &tenantIDRoundTripper{
-			tenantName: tenantName,
-			next:       config_util.NewBasicAuthRoundTripper(username, config_util.Secret(password), "", api.DefaultRoundTripper),
+		RoundTripper: &TenantIDRoundTripper{
+			TenantName: tenantName,
+			Next:       config_util.NewBasicAuthRoundTripper(username, config_util.Secret(password), "", api.DefaultRoundTripper),
 		},
 	})
 
@@ -166,7 +166,7 @@ func newQueryClient(url, tenantName, username, password string) (v1.API, error) 
 	return v1.NewAPI(apiClient), nil
 }
 
-func (q *queryRunner) getRandomAPIClient() (v1.API, error) {
+func (q *QueryRunner) GetRandomAPIClient() (v1.API, error) {
 	q.addressMtx.Lock()
 	defer q.addressMtx.Unlock()
 
@@ -182,7 +182,7 @@ func (q *queryRunner) getRandomAPIClient() (v1.API, error) {
 	var err error
 
 	if cli, exists = q.clientPool[pick]; !exists {
-		cli, err = newQueryClient("http://"+pick+"/prometheus", q.tenantName, q.cfg.BasicAuthUsername, q.cfg.BasicAuthPasword)
+		cli, err = NewQueryClient("http://"+pick+"/prometheus", q.tenantName, q.cfg.BasicAuthUsername, q.cfg.BasicAuthPasword)
 		if err != nil {
 			return nil, err
 		}
@@ -192,10 +192,10 @@ func (q *queryRunner) getRandomAPIClient() (v1.API, error) {
 	return cli, nil
 }
 
-func (q *queryRunner) executeQuery(ctx context.Context, queryReq query) error {
+func (q *QueryRunner) ExecuteQuery(ctx context.Context, queryReq Query) error {
 	spanLog, ctx := spanlogger.New(ctx, "queryRunner.executeQuery")
 	defer spanLog.Span.Finish()
-	apiClient, err := q.getRandomAPIClient()
+	apiClient, err := q.GetRandomAPIClient()
 	if err != nil {
 		return err
 	}
@@ -207,18 +207,18 @@ func (q *queryRunner) executeQuery(ctx context.Context, queryReq query) error {
 		queryType string = "instant"
 		status    string = "success"
 	)
-	if queryReq.timeRange > 0 {
+	if queryReq.TimeRange > 0 {
 		queryType = "range"
-		level.Debug(q.logger).Log("msg", "sending range query", "expr", queryReq.expr, "range", queryReq.timeRange)
+		level.Debug(q.logger).Log("msg", "sending range query", "expr", queryReq.Expr, "range", queryReq.TimeRange)
 		r := v1.Range{
-			Start: now.Add(-queryReq.timeRange),
+			Start: now.Add(-queryReq.TimeRange),
 			End:   now,
 			Step:  time.Minute,
 		}
-		_, _, err = apiClient.QueryRange(ctx, queryReq.expr, r)
+		_, _, err = apiClient.QueryRange(ctx, queryReq.Expr, r)
 	} else {
-		level.Debug(q.logger).Log("msg", "sending instant query", "expr", queryReq.expr)
-		_, _, err = apiClient.Query(ctx, queryReq.expr, now)
+		level.Debug(q.logger).Log("msg", "sending instant query", "expr", queryReq.Expr)
+		_, _, err = apiClient.Query(ctx, queryReq.Expr, now)
 	}
 
 	if err != nil {
@@ -229,8 +229,8 @@ func (q *queryRunner) executeQuery(ctx context.Context, queryReq query) error {
 	return err
 }
 
-func (q *queryRunner) resolveAddrsLoop(ctx context.Context) {
-	err := q.resolveAddrs()
+func (q *QueryRunner) ResolveAddrsLoop(ctx context.Context) {
+	err := q.ResolveAddrs()
 	if err != nil {
 		level.Warn(q.logger).Log("msg", "failed update remote write servers list", "err", err)
 	}
@@ -240,7 +240,7 @@ func (q *queryRunner) resolveAddrsLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ticker.C:
-			err := q.resolveAddrs()
+			err := q.ResolveAddrs()
 			if err != nil {
 				level.Warn(q.logger).Log("msg", "failed update remote write servers list", "err", err)
 			}
@@ -250,7 +250,7 @@ func (q *queryRunner) resolveAddrsLoop(ctx context.Context) {
 	}
 }
 
-func (q *queryRunner) resolveAddrs() error {
+func (q *QueryRunner) ResolveAddrs() error {
 	// Resolve configured addresses with a reasonable timeout.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

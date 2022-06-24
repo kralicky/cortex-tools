@@ -41,7 +41,7 @@ type Runner struct {
 	cfg Config
 
 	writeRunner     *WriteBenchmarkRunner
-	queryRunner     *queryRunner
+	queryRunner     *QueryRunner
 	ringCheckRunner *RingChecker
 }
 
@@ -60,7 +60,7 @@ func NewBenchRunner(cfg Config, logger log.Logger, reg prometheus.Registerer) (*
 	}
 
 	level.Info(logger).Log("msg", "building workload")
-	workload := newWriteWorkload(workloadDesc, prometheus.DefaultRegisterer)
+	workload := NewWriteWorkload(workloadDesc, prometheus.DefaultRegisterer)
 
 	benchRunner := &Runner{
 		cfg: cfg,
@@ -81,11 +81,11 @@ func NewBenchRunner(cfg Config, logger log.Logger, reg prometheus.Registerer) (*
 	}
 
 	if cfg.Query.Enabled {
-		queryWorkload, err := newQueryWorkload(cfg.ID, workloadDesc)
+		queryWorkload, err := NewQueryWorkload(cfg.ID, workloadDesc)
 		if err != nil {
 			return nil, errors.Wrap(err, "unable to create query benchmark workload")
 		}
-		benchRunner.queryRunner, err = newQueryRunner(cfg.ID, cfg.InstanceName, cfg.Query, queryWorkload, logger, reg)
+		benchRunner.queryRunner, err = NewQueryRunner(cfg.ID, cfg.InstanceName, cfg.Query, queryWorkload, logger, reg)
 		if err != nil {
 			return nil, errors.Wrap(err, "unable to create query benchmark runner")
 		}

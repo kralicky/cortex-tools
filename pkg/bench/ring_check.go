@@ -91,12 +91,12 @@ func (r *RingChecker) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			r.check()
+			r.Check()
 		}
 	}
 }
 
-func (r *RingChecker) check() {
+func (r *RingChecker) Check() {
 	timeseries := r.workload.GenerateTimeSeries(r.id, time.Now())
 
 	addrMap := map[string]int{}
@@ -105,7 +105,7 @@ func (r *RingChecker) check() {
 			return strings.Compare(s.Labels[i].Name, s.Labels[j].Name) < 0
 		})
 
-		token := shardByAllLabels(r.instanceName, s.Labels)
+		token := ShardByAllLabels(r.instanceName, s.Labels)
 
 		rs, err := r.Ring.Get(token, ring.Write, []ring.InstanceDesc{}, nil, nil)
 		if err != nil {
@@ -129,15 +129,15 @@ func (r *RingChecker) check() {
 	}
 }
 
-func shardByUser(userID string) uint32 {
+func ShardByUser(userID string) uint32 {
 	h := ingester_client.HashNew32()
 	h = ingester_client.HashAdd32(h, userID)
 	return h
 }
 
 // This function generates different values for different order of same labels.
-func shardByAllLabels(userID string, labels []prompb.Label) uint32 {
-	h := shardByUser(userID)
+func ShardByAllLabels(userID string, labels []prompb.Label) uint32 {
+	h := ShardByUser(userID)
 	for _, label := range labels {
 		h = ingester_client.HashAdd32(h, label.Name)
 		h = ingester_client.HashAdd32(h, label.Value)
