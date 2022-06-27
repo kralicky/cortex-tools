@@ -11,7 +11,6 @@ import (
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
-	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
@@ -184,7 +183,7 @@ func (w *WriteBenchmarkRunner) SendBatch(ctx context.Context, batch []prompb.Tim
 		Timeseries: batch,
 	}
 
-	data, err := proto.Marshal(&req)
+	data, err := req.Marshal()
 	if err != nil {
 		return errors.Wrap(err, "failed to marshal remote-write request")
 	}

@@ -5,7 +5,7 @@ IMAGE_PREFIX ?= grafana
 IMAGE_TAG := $(shell ./tools/image-tag)
 GIT_REVISION := $(shell git rev-parse --short HEAD)
 GIT_BRANCH := $(shell git rev-parse --abbrev-ref HEAD)
-GO_FLAGS := -mod=vendor -ldflags "-extldflags \"-static\" -s -w -X $(VPREFIX).Branch=$(GIT_BRANCH) -X $(VPREFIX).Version=$(IMAGE_TAG) -X $(VPREFIX).Revision=$(GIT_REVISION)" -tags netgo
+GO_FLAGS := -ldflags "-extldflags \"-static\" -s -w -X $(VPREFIX).Branch=$(GIT_BRANCH) -X $(VPREFIX).Version=$(IMAGE_TAG) -X $(VPREFIX).Revision=$(GIT_REVISION)" -tags netgo
 
 all: cortextool chunktool logtool
 images: cortextool-image chunktool-image logtool-image benchtool-image
@@ -78,7 +78,7 @@ cross:
 	CGO_ENABLED=0 gox -output="dist/{{.Dir}}-{{.OS}}-{{.Arch}}" -ldflags=${LDFLAGS} -arch="amd64" -os="linux windows darwin" -osarch="darwin/arm64" ./cmd/sim
 
 test:
-	go test -mod=vendor -p=8 ./pkg/...
+	go test -p=8 ./pkg/...
 
 clean:
 	rm -rf cmd/benchtool/benchtool
